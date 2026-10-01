@@ -54,7 +54,7 @@ go build -o jsmap .
 | `--url`         | `-u`  | *(required)*                   | Target URL to scan                    |
 | `--rules`       | `-r`  | `templates/js-secrets.toml`    | Path to the rules TOML file           |
 | `--concurrency` | `-c`  | `5`                             | Number of concurrent script fetches   |
-| `--only` | `-o`  | `secrect|links`                             | Speficies to their gets secrets or links |
+| `--only` | `-o`  | `secrect\|links`                             | Speficies to their gets secrets or links |
 
 ```bash
 ./jsmap -u https://example.com -r templates/js-secrets.toml -c 10
