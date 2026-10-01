@@ -18,6 +18,7 @@ var (
 	targetURL   string
 	rulesPath   string
 	concurrency int
+	only        string // "all" (default), "secrets", or "links"
 )
 
 var rootCmd = &cobra.Command{
@@ -40,16 +41,32 @@ func init() {
 	rootCmd.Flags().StringVarP(&targetURL, "url", "u", "", "Target URL to scan (required)")
 	rootCmd.Flags().StringVarP(&rulesPath, "rules", "r", "templates/js-secrets.toml", "Path to rules TOML file")
 	rootCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 5, "Number of concurrent script fetches")
+	rootCmd.Flags().StringVarP(&only, "only", "o", "all", `What to report: "all", "secrets", or "links"`)
 
 	rootCmd.MarkFlagRequired("url")
 }
 
 func runScan(_ *cobra.Command, _ []string) error {
+	switch only {
+	case "all", "secrets", "links":
+		// valid
+	default:
+		return fmt.Errorf(`invalid --only value %q: must be "all", "secrets", or "links"`, only)
+	}
+
 	rules, err := internal.LoadRules(rulesPath)
 	if err != nil {
 		return fmt.Errorf("loading rules: %w", err)
 	}
-	fmt.Printf("Loaded %d rules\n", len(rules))
+
+	if only != "all" {
+		wantTag := "secret"
+		if only == "links" {
+			wantTag = "link"
+		}
+		rules = filterRulesByTag(rules, wantTag)
+	}
+	fmt.Printf("Loaded %d rules (--only=%s)\n", len(rules), only)
 
 	c := colly.NewCollector()
 	var scriptURLs []string
@@ -107,20 +124,38 @@ func runScan(_ *cobra.Command, _ []string) error {
 
 	wg.Wait()
 
-	secrets := internal.Dedupe(internal.FilterByTag(allFindings, "secret"))
-	links := internal.Dedupe(internal.FilterByTag(allFindings, "link"))
-
-	fmt.Printf("\n=== Secrets (%d) ===\n", len(secrets))
-	for _, f := range secrets {
-		fmt.Printf("[%s] %s\n  -> %s\n\n", f.RuleID, f.Source, f.Match)
+	if only == "all" || only == "secrets" {
+		secrets := internal.Dedupe(internal.FilterByTag(allFindings, "secret"))
+		fmt.Printf("\n=== Secrets (%d) ===\n", len(secrets))
+		for _, f := range secrets {
+			fmt.Printf("[%s] %s\n  -> %s\n\n", f.RuleID, f.Source, f.Match)
+		}
 	}
 
-	fmt.Printf("=== Links (%d) ===\n", len(links))
-	for _, f := range links {
-		fmt.Printf("[%s] %s\n  -> %s\n\n", f.RuleID, f.Source, f.Match)
+	if only == "all" || only == "links" {
+		links := internal.Dedupe(internal.FilterByTag(allFindings, "link"))
+		fmt.Printf("=== Links (%d) ===\n", len(links))
+		for _, f := range links {
+			fmt.Printf("[%s] %s\n  -> %s\n\n", f.RuleID, f.Source, f.Match)
+		}
 	}
 
 	return nil
+}
+
+// filterRulesByTag returns only the compiled rules carrying the given tag,
+// so scanning can skip regexes that are irrelevant to what --only asked for.
+func filterRulesByTag(rules []internal.CompiledRule, tag string) []internal.CompiledRule {
+	var out []internal.CompiledRule
+	for _, r := range rules {
+		for _, t := range r.Tags {
+			if t == tag {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func fetchJS(url string) (string, error) {
